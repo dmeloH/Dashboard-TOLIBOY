@@ -1,48 +1,34 @@
 import { Injectable } from '@angular/core';
 import {
-    HttpRequest,
-    HttpHandler,
-    HttpEvent,
-    HttpInterceptor,
+  HttpInterceptor,
+  HttpRequest,
+  HttpHandler,
+  HttpEvent
 } from '@angular/common/http';
 import { Observable } from 'rxjs';
 
-import { AuthenticationService } from '../services/auth.service';
-import { AuthfakeauthenticationService } from '../services/authfake.service';
-import { environment } from '../../../environments/environment';
-
 @Injectable()
 export class JwtInterceptor implements HttpInterceptor {
-    constructor(
-        private authenticationService: AuthenticationService,
-        private authfackservice: AuthfakeauthenticationService
-    ) { }
+  intercept(request: HttpRequest<any>, next: HttpHandler): Observable<HttpEvent<any>> {
+    try {
+      const raw = localStorage.getItem('currentUser');
+      const currentUser = raw ? JSON.parse(raw) : null;
 
-    intercept(
-        request: HttpRequest<any>,
-        next: HttpHandler
-    ): Observable<HttpEvent<any>> {
-        if (environment.defaultauth === 'firebase') {
-            // add authorization header with jwt token if available
-            let currentUser = this.authenticationService.currentUser();
-            if (currentUser && currentUser.token) {
-                request = request.clone({
-                    setHeaders: {
-                        Authorization: `Bearer ${currentUser.token}`,
-                    },
-                });
-            }
-        } else {
-            // add authorization header with jwt token if available
-            const currentUser = this.authfackservice.currentUserValue;
-            if (currentUser && currentUser.token) {
-                request = request.clone({
-                    setHeaders: {
-                        Authorization: `Bearer ${currentUser.token}`,
-                    },
-                });
-            }
-        }
-        return next.handle(request);
+      // soporta: currentUser.token | currentUser.data.token | token guardado directamente en localStorage
+      const tokenFromUser = currentUser?.token ?? currentUser?.data?.token ?? localStorage.getItem('token');
+
+      if (tokenFromUser) {
+        request = request.clone({
+          setHeaders: {
+            Authorization: `Bearer ${tokenFromUser}`
+          }
+        });
+      }
+    } catch (e) {
+      // si JSON.parse falla por cualquier motivo, no rompemos la petición; seguimos sin header
+      console.warn('JwtInterceptor: no se pudo obtener token de localStorage', e);
     }
+
+    return next.handle(request);
+  }
 }

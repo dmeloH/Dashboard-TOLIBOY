@@ -14,9 +14,19 @@ export class AuthenticationEffects {
       ofType(Register),
       exhaustMap(({ email, first_name, password }) =>
         this.AuthenticationService.register(email, first_name, password).pipe(
-          map((user) => {
+          map((resp: any) => {
+            // normalizar respuesta
+            const storedUser = resp?.user ?? resp?.data ?? resp ?? null;
+            const token = resp?.token ?? resp?.data?.token ?? resp?.user?.token ?? storedUser?.token ?? localStorage.getItem('token');
+            if (storedUser) {
+              localStorage.setItem('currentUser', JSON.stringify(storedUser));
+            }
+            if (token) {
+              localStorage.setItem('token', token);
+            }
+            // Navegar a login (si quieres que vaya a login después del registro)
             this.router.navigate(['/auth/login']);
-            return loginSuccess({ user });
+            return loginSuccess({ user: storedUser });
           }),
           catchError((error) => of(loginFailure({ error })))
         )
@@ -29,11 +39,25 @@ export class AuthenticationEffects {
       ofType(login),
       exhaustMap(({ email, password }) =>
         this.AuthenticationService.login(email, password).pipe(
-          map((user) => {
-            localStorage.setItem('currentUser', JSON.stringify(user.data));
-            localStorage.setItem('token', user.token);
-            this.router.navigate(['/']);
-            return loginSuccess({ user });
+          map((resp: any) => {
+            // Normalizar respuesta defensivamente:
+            // formatos soportados: { user: {...}, token: '...' }  OR { data: {...}, token: '...' } OR user en raíz
+            const storedUser = resp?.user ?? resp?.data ?? resp ?? null;
+            const token = resp?.token ?? resp?.data?.token ?? resp?.user?.token ?? storedUser?.token ?? localStorage.getItem('token');
+
+            // Persistencia defensiva
+            if (storedUser) {
+              localStorage.setItem('currentUser', JSON.stringify(storedUser));
+            } else {
+              localStorage.removeItem('currentUser');
+            }
+
+            if (token) {
+              localStorage.setItem('token', token);
+            }
+
+            // Debemos devolver una acción para que el effect despache algo
+            return loginSuccess({ user: storedUser });
           }),
           catchError((error) => of(loginFailure({ error })))
         )
@@ -41,12 +65,39 @@ export class AuthenticationEffects {
     )
   );
 
+  // efecto para reaccionar al loginSuccess y redirigir según rol
+  loginSuccessRedirect$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(loginSuccess),
+      tap(({ user }: any) => {
+        const role = user?.role ?? (user?.data?.role ?? null);
+        // Si el backend no devuelve role, puedes basarte en alguna heurística o dejar navegar al dashboard por defecto
+        if (role === 'USER') {
+          // redirigir user a kanban
+          this.router.navigateByUrl('/apps/kanban');
+        } else {
+          // admin u otros roles van al root / dashboard
+          this.router.navigateByUrl('/');
+        }
+      })
+    ),
+    { dispatch: false }
+  );
+
   signInWithFacebook$ = createEffect(() =>
     this.actions$.pipe(
       ofType(signInWithFacebook),
       exhaustMap(() =>
         from(this.AuthenticationService.signInWithFacebook()).pipe(
-          map(user => {
+          map((resp: any) => {
+            const user = resp?.user ?? resp?.data ?? resp ?? null;
+            const token = resp?.token ?? resp?.data?.token ?? user?.token ?? localStorage.getItem('token');
+            if (user) {
+              localStorage.setItem('currentUser', JSON.stringify(user));
+            }
+            if (token) {
+              localStorage.setItem('token', token);
+            }
             return loginSuccess({ user });
           }),
           catchError(error => of(loginFailure({ error })))
@@ -60,7 +111,15 @@ export class AuthenticationEffects {
       ofType(signInWithGoogle),
       exhaustMap(() =>
         from(this.AuthenticationService.signInWithGoogle()).pipe(
-          map(user => {
+          map((resp: any) => {
+            const user = resp?.user ?? resp?.data ?? resp ?? null;
+            const token = resp?.token ?? resp?.data?.token ?? user?.token ?? localStorage.getItem('token');
+            if (user) {
+              localStorage.setItem('currentUser', JSON.stringify(user));
+            }
+            if (token) {
+              localStorage.setItem('token', token);
+            }
             return loginSuccess({ user });
           }),
           catchError(error => of(loginFailure({ error })))
@@ -69,12 +128,14 @@ export class AuthenticationEffects {
     )
   );
 
-
   logout$ = createEffect(() =>
     this.actions$.pipe(
       ofType(logout),
       tap(() => {
-        // Perform any necessary cleanup or side effects before logging out
+        // Limpiar almacenamiento local al hacer logout
+        localStorage.removeItem('currentUser');
+        localStorage.removeItem('token');
+        // puedes invocar servicios si necesitas
       }),
       exhaustMap(() => of(logoutSuccess()))
     )
